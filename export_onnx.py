@@ -165,7 +165,7 @@ def export_control_net_model():
     context = torch.randn(1, 77, 768, dtype=torch.float32)
 
     input_names = ["x_noisy", "hint", "timestep", "context"]
-    output_names = ["latent"]
+    output_names = [f"control{i}" for i in range(13)]
 
     onnx_path = "./onnx/ControlNet.onnx"
 
@@ -177,6 +177,7 @@ def export_control_net_model():
         opset_version=18,
         do_constant_folding=True,
         input_names=input_names,
+        output_names=output_names,
         keep_initializers_as_inputs=True
     )
 
@@ -265,6 +266,7 @@ def export_decoder_model():
         opset_version=18,
         do_constant_folding=True,
         input_names=input_names,
+        output_names=output_names,
         keep_initializers_as_inputs=True
     )
 

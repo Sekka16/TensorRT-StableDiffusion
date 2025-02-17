@@ -8,6 +8,8 @@ from transformers import T5Tokenizer, T5EncoderModel, CLIPTokenizer, CLIPTextMod
 
 import open_clip
 from ldm.util import default, count_params
+from Engine import Engine
+from polygraphy import cuda
 
 
 class AbstractEncoder(nn.Module):
@@ -101,6 +103,22 @@ class FrozenCLIPEmbedder(AbstractEncoder):
         self.tokenizer = CLIPTokenizer.from_pretrained(version, cache_dir=os.getcwd() + "/models")
         self.transformer = CLIPTextModel.from_pretrained(version, cache_dir=os.getcwd() + "/models")
 
+        self.clip_trt = False
+        clip_engine_path = "./engine/CLIP.plan"
+        if not os.path.exists(clip_engine_path):
+            self.clip_trt = False
+        if self.clip_trt:
+            self.clip_engine = Engine(clip_engine_path)
+            self.clip_engine.load()
+            print("engine {} load.".format(clip_engine_path))
+            self.clip_engine.activate()
+            clip_shape_dict = self.clip_engine.clip_model_shape_dict(1, max_length, 768)
+            self.clip_engine.allocate_buffers(clip_shape_dict)
+            print("engine context load")
+            self.clip_engine.get_engine_infor()
+        self.cuda_graph_instance = None
+        self.stream = cuda.Stream()
+
         # self.tokenizer.save_pretrained("/data1/wgyang/play/shenlan/CNSD/ControlNet_bk/models")
         # self.transformer.save_pretrained("/data1/wgyang/play/shenlan/CNSD/ControlNet_bk/models")
 
@@ -124,7 +142,12 @@ class FrozenCLIPEmbedder(AbstractEncoder):
         batch_encoding = self.tokenizer(text, truncation=True, max_length=self.max_length, return_length=True,
                                         return_overflowing_tokens=False, padding="max_length", return_tensors="pt")
         tokens = batch_encoding["input_ids"].to(self.device)
-        outputs = self.transformer(input_ids=tokens, output_hidden_states=self.layer=="hidden")
+
+        if self.clip_trt:
+            input_dict = {'input_ids': tokens, 'last_hidden_state': self.layer=="hidden"}
+            outputs = self.clip_engine.infer(input_dict, stream=self.stream, use_cuda_graph=True)
+        else:
+            outputs = self.transformer(input_ids=tokens, output_hidden_states=self.layer=="hidden")
 
         if 0:
             self.transformer.half()
@@ -132,12 +155,20 @@ class FrozenCLIPEmbedder(AbstractEncoder):
             out = self.transformer(tokens)
             print(out)
 
-        if self.layer == "last":
-            z = outputs.last_hidden_state
-        elif self.layer == "pooled":
-            z = outputs.pooler_output[:, None, :]
+        if self.clip_trt:
+            if self.layer == "last":
+                z = outputs['last_hidden_state']
+            elif self.layer == "pooled":
+                z = outputs['pooler_output'][:, None, :]
+            else:
+                z = outputs['hidden_states'][self.layer_idx]
         else:
-            z = outputs.hidden_states[self.layer_idx]
+            if self.layer == "last":
+                z = outputs.last_hidden_state
+            elif self.layer == "pooled":
+                z = outputs.pooler_output[:, None, :]
+            else:
+                z = outputs.hidden_states[self.layer_idx]
         return z
 
     def encode(self, text):

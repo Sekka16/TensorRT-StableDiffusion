@@ -7,6 +7,9 @@ from einops import rearrange
 from typing import Optional, Any
 
 from ldm.modules.attention import MemoryEfficientCrossAttention
+import os
+from Engine import Engine
+from polygraphy import cuda
 
 try:
     import xformers
@@ -615,8 +618,28 @@ class Decoder(nn.Module):
                                         kernel_size=3,
                                         stride=1,
                                         padding=1)
+        self.decoder_trt = True
+        decoder_engine_path = "./engine/Decoder.plan"
+        if not os.path.exists(decoder_engine_path):
+            self.decoder_trt = False
+        if self.decoder_trt:
+            self.decoder_engine = Engine(decoder_engine_path)
+            self.decoder_engine.load()
+            print("engine {} load.".format(decoder_engine_path))
+            self.decoder_engine.activate()
+            decoder_shape_dict = self.decoder_engine.decoder_model_shape_dict()
+            self.decoder_engine.allocate_buffers(decoder_shape_dict)
+            print("engine context load")
+            self.decoder_engine.get_engine_infor()
+        self.cuda_graph_instance = None
+        self.stream = cuda.Stream()
+
 
     def forward(self, z):
+        input_dict = {'latent': z}
+        h_trt = self.decoder_engine.infer(input_dict, stream=self.stream, use_cuda_graph=True)
+        h_trt = h_trt['812']
+
         #assert z.shape[1:] == self.z_shape[1:]
         self.last_z_shape = z.shape
 
@@ -649,6 +672,37 @@ class Decoder(nn.Module):
         h = self.conv_out(h)
         if self.tanh_out:
             h = torch.tanh(h)
+
+        assert h.shape == h_trt.shape, f"Shape mismatch: h.shape = {h.shape}, h_trt.shape = {h_trt.shape}"
+        # 假设 h 和 h_trt 是你的两个张量
+        diff = torch.abs(h - h_trt)
+
+        # 打开文件以写入
+        with open('decoder_precision_log.txt', 'w') as log_file:
+            # 打印和记录最大和最小差异
+            log_file.write(f"Max diff: {diff.max()}\n")
+            log_file.write(f"Min diff: {diff.min()}\n")
+
+            # 找到最大差异的索引并记录
+            max_diff_idx = torch.argmax(diff)
+            log_file.write(f"Max difference at index: {max_diff_idx}\n")
+            log_file.write(f"Value in h: {h.flatten()[max_diff_idx]}\n")
+            log_file.write(f"Value in h_trt: {h_trt.flatten()[max_diff_idx]}\n")
+
+            # 打印和记录数据类型
+            log_file.write(f"h dtype: {h.dtype}, h_trt dtype: {h_trt.dtype}\n")
+
+            # 打印和记录最大最小值
+            log_file.write(f"h min, max: {h.min()}, {h.max()}\n")
+            log_file.write(f"h_trt min, max: {h_trt.min()}, {h_trt.max()}\n")
+
+            log_file.write("\n[End of Log]\n")
+
+        print("Precision log has been written to 'decoder_precision_log.txt'.")
+        assert torch.allclose(h, h_trt, atol=1e-3, rtol=1e-3), "h and h_trt values are not close enough"
+
+        if self.decoder_trt:
+            h = h_trt
         return h
 
 
