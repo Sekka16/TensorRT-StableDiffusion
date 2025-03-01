@@ -9,6 +9,9 @@ from ldm.modules.distributions.distributions import DiagonalGaussianDistribution
 from ldm.util import instantiate_from_config
 from ldm.modules.ema import LitEma
 
+import os
+from Engine import Engine
+from polygraphy import cuda
 
 class AutoencoderKL(pl.LightningModule):
     def __init__(self,
@@ -49,6 +52,22 @@ class AutoencoderKL(pl.LightningModule):
         if ckpt_path is not None:
             self.init_from_ckpt(ckpt_path, ignore_keys=ignore_keys)
 
+        self.decoder_trt = True
+        decoder_engine_path = "./engine/Decoder.plan"
+        if not os.path.exists(decoder_engine_path):
+            self.decoder_trt = False
+        if self.decoder_trt:
+            self.decoder_engine = Engine(decoder_engine_path)
+            self.decoder_engine.load()
+            print("engine {} load.".format(decoder_engine_path))
+            self.decoder_engine.activate()
+            decoder_shape_dict = self.decoder_engine.decoder_model_shape_dict()
+            self.decoder_engine.allocate_buffers(decoder_shape_dict)
+            print("engine context load")
+            self.decoder_engine.get_engine_infor()
+        self.cuda_graph_instance = None
+        self.stream = cuda.Stream()
+
     def init_from_ckpt(self, path, ignore_keys=list()):
         sd = torch.load(path, map_location="cpu")["state_dict"]
         keys = list(sd.keys())
@@ -86,8 +105,13 @@ class AutoencoderKL(pl.LightningModule):
         return posterior
 
     def decode(self, z):
-        z = self.post_quant_conv(z)
-        dec = self.decoder(z)
+        if self.decoder_trt:
+            input_dict = {'latent': z}
+            dec = self.decoder_engine.infer(input_dict, stream=self.stream, use_cuda_graph=True)
+            dec = dec['images']
+        else:
+            z = self.post_quant_conv(z)
+            dec = self.decoder(z)
         return dec
 
     def forward(self, input, sample_posterior=True):
