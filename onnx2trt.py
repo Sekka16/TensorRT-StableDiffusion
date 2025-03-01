@@ -67,7 +67,6 @@ def export_clip_model():
 
     onnx2trt(onnx_path, plan_path, [(1, 77)], [(1, 77)], [(1, 77)])
 
-    # onnx2trt(onnx_path, plan_path, [(1, 1)], [(1, 77)], [(1, 128)], use_fp16=True)
     print("======================= CLIP onnx2trt done!")
 
 def export_control_net_model():
@@ -81,13 +80,6 @@ def export_control_net_model():
              get_shapes(1, 77),
              get_shapes(1, 77),
              get_shapes(1, 77))
-
-        # plan_path = plan_path_prefix + str(l) + "_fp16.plan"
-        # onnx2trt(onnx_path, plan_path,
-                 # get_shapes(1, 1),
-                 # get_shapes(1, 77),
-                 # get_shapes(1, 128),
-                 # use_fp16=True)
 
     print("======================= ControlNet onnx2trt done!")
 
@@ -118,12 +110,6 @@ def export_controlled_unet_model():
              get_shapes(1, 77),
              get_shapes(1, 77))
 
-    # onnx2trt(onnx_path, plan_path,
-             # get_shapes(1, 1),
-             # get_shapes(1, 77),
-             # get_shapes(1, 128),
-             # use_fp16=True)
-
     print("======================= ControlNet onnx2trt done!")
 
 def export_decoder_model():
@@ -132,10 +118,6 @@ def export_decoder_model():
 
     onnx2trt(onnx_path, plan_path,
             [(1, 4, 32, 48)], [(1, 4, 32, 48)], [(1, 4, 32, 48)])
-
-    # onnx2trt(onnx_path, plan_path,
-            # [(1, 4, 32, 48)], [(1, 4, 32, 48)], [(1, 4, 32, 48)],
-             # use_fp16=True)
 
     print("======================= Decoder  onnx2trt done!")
 

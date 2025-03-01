@@ -50,6 +50,7 @@ def optimize(onnx_path, opt_onnx_path):
 #         if ret is False:
 #             print("Error onnxruntime_check")
 #             # import pdb; pdb.set_trace()
+
 def onnxruntime_check(onnx_path, input_dicts, torch_outputs, output_file="onnxruntime_check_errors.txt"):
     # 确保输出文件的目录存在
     output_dir = os.path.dirname(output_file)
@@ -144,16 +145,11 @@ def export_clip_model():
         input_names=input_names,
         output_names=output_names,
     )
-    print("======================= CLIP model export onnx done!")
 
     # verify onnx model
     output = clip_model(tokens)
     input_dicts = {"input_ids": tokens.numpy()}
     onnxruntime_check(onnx_path, input_dicts, [output])
-    print("======================= CLIP onnx model verify done!")
-
-    # opt_onnx_path = "./onnx/CLIP.opt.onnx"
-    # optimize(onnx_path, opt_onnx_path)
 
 
 def export_control_net_model():
